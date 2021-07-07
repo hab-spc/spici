@@ -26,7 +26,7 @@ import pandas as pd
 from lxml import html
 
 # Project Level Imports
-from spici.helper import SPCDataTransformer
+from helper import SPCDataTransformer
 
 # Module Level Constants
 CAMERAS = ['SPC2' , 'SPCP2', 'SPC-BIG']
@@ -45,7 +45,7 @@ class SPCServer(object):
 
     """
 
-    def __init__(self):
+    def __init__(self, daylight_savings=False):
         """ Creates a new SPCServer.
 
         """
@@ -76,6 +76,9 @@ class SPCServer(object):
 
         # Set to true if synchronous image writing is needed (i.e. on faster hard drives like SSDs)
         self.sync_write = False
+
+        # Flag for daylight savings
+        self.daylight_savings = daylight_savings
 
 
 
@@ -197,7 +200,7 @@ class SPCServer(object):
             dfs = await asyncio.gather(*tasks)
             return pd.concat(dfs, ignore_index=True)
 
-    def retrieve(self, textfile, output_dir, output_csv_filename, download=False):
+    def retrieve(self, textfile, data_dir, output_csv_filename, download=False):
         """Retrieves images from url and outputs images and meta data to desired output dir and filename respectively
 
         Usage:
@@ -208,7 +211,7 @@ class SPCServer(object):
                         download=True)
 
         :param textfile: 'str' representing path to text file for parsing download configurations
-        :param output_dir: 'str' representing path to desired output directory for downloaded images
+        :param data_dir: 'str' representing path to desired output directory for downloaded images
         :param output_csv_filename: 'str' representing where to output meta csv file
         :param download: 'bool' to flag downloading option
         :return:
@@ -216,8 +219,8 @@ class SPCServer(object):
         time_init = datetime.datetime.now()
 
         # Output directory
-        if output_dir is not None:
-            self.output_dir = output_dir
+        if data_dir is not None:
+            self.output_dir = data_dir
             if not os.path.exists(self.output_dir):
                 os.makedirs(self.output_dir)
 
@@ -235,7 +238,7 @@ class SPCServer(object):
 
         loop = asyncio.get_event_loop()
         df = loop.run_until_complete(self.async_e2e_dl(self.data['url'], download))
-        df = SPCDataTransformer(data=df).transform(image_dir=output_dir)
+        df = SPCDataTransformer(data=df).transform(image_dir=data_dir)
         df.to_csv(output_csv_filename, index=False)
 
         time_done = datetime.datetime.now()
@@ -379,7 +382,7 @@ class SPCServer(object):
         df = self.map_labels(dataframe=df, label_file=self.label_file, mapped_column='label')
 
         # Labels
-        self.labels = sorted(df['class'].unique())
+        self.labels = sorted(df['class'].astype(str).unique())
 
         return df.groupby(df['class'])
 
@@ -436,13 +439,12 @@ class SPCServer(object):
             # Parse date
             dt = datetime.datetime.strptime(date, '%Y-%m-%d %H:%M:%S')
 
-            # Check if daylight savings time
-            dst = is_dst(dt, timezone="America/Los_Angeles")
             utc_date = calendar.timegm(pytz.timezone(
                 'America/Los_Angeles').localize(dt).utctimetuple())
 
-            # Returns Epoch Unix time
-            if dst:
+            # Check if daylight savings time
+            if self.daylight_savings and is_dst(dt, timezone="America/Los_Angeles"):
+                # Returns Epoch Unix time
                 return (utc_date+3600)*1000
             else:
                 return utc_date*1000
